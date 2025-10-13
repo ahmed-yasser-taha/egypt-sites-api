@@ -169,6 +169,70 @@ async def get_all_categories():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+# Pydantic model for instructions
+class Instruction(BaseModel):
+    id: Optional[int] = None
+    image_url: Optional[str] = None
+    place: Optional[str] = None
+    instructions: Optional[str] = None
+    source: Optional[str] = None
+
+class InstructionResponse(BaseModel):
+    status: str
+    data: List[Instruction]
+    count: int
+
+class SingleInstructionResponse(BaseModel):
+    status: str
+    data: Instruction
+
+
+@app.get("/instructions", response_model=InstructionResponse)
+async def get_all_instructions(limit: int = 50, offset: int = 0):
+    """
+    Get all place instructions with pagination
+    """
+    try:
+        response = supabase.table("places_instructions")\
+            .select("*")\
+            .range(offset, offset + limit - 1)\
+            .execute()
+
+        data = [Instruction(**row) for row in response.data]
+
+        return {
+            "status": "success",
+            "data": data,
+            "count": len(data)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@app.get("/instructions/{instruction_id}", response_model=SingleInstructionResponse)
+async def get_instruction_by_id(instruction_id: int):
+    """
+    Get a single place instruction by ID
+    """
+    try:
+        response = supabase.table("places_instructions")\
+            .select("*")\
+            .eq("id", instruction_id)\
+            .execute()
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Instruction not found")
+
+        instruction = Instruction(**response.data[0])
+
+        return {
+            "status": "success",
+            "data": instruction
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
