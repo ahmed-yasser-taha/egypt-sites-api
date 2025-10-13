@@ -52,14 +52,16 @@ class SingleSiteResponse(BaseModel):
 async def root():
     return {
         "message": "Egypt Sites API",
-        "version": "1.0.0",
-        "description": "API for Egyptian historical sites, museums, and tourist attractions",
+        "version": "1.1.0",
+        "description": "API for Egyptian historical sites, museums, tourist attractions, and detailed local place instructions.",
         "endpoints": {
             "GET /": "API documentation",
             "GET /sites": "Get all sites (supports ?limit=50&offset=0 for pagination)",
-            "GET /sites/{site_id}": "Get specific site by ID",
+            "GET /site/{site_id}": "Get specific site by ID",
             "GET /categories": "Get all available categories",
-            "GET /category/{category_name}": "Get sites by category"
+            "GET /category/{category_name}": "Get sites by category",
+            "GET /instructions": "Get all place instructions (supports ?limit=50&offset=0 for pagination)",
+            "GET /instructions/{instruction_id}": "Get specific instruction by ID"
         },
         "interactive_docs": {
             "swagger_ui": "/docs",
@@ -67,12 +69,15 @@ async def root():
         },
         "example_usage": {
             "get_all_sites": "/sites?limit=10&offset=0",
-            "get_site_by_id": "/sites/1",
+            "get_site_by_id": "/site/1",
             "get_categories": "/categories",
             "get_museums": "/category/Museums",
-            "get_historical_sites": "/category/Historical_Sites"
+            "get_historical_sites": "/category/Historical_Sites",
+            "get_all_instructions": "/instructions?limit=10&offset=0",
+            "get_instruction_by_id": "/instructions/1"
         }
     }
+
 
 @app.get("/sites", response_model=SiteResponse)
 async def get_all_sites(limit: int = 50, offset: int = 0):
