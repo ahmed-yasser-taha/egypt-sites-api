@@ -181,6 +181,7 @@ class Instruction(BaseModel):
     place: Optional[str] = None
     instructions: Optional[str] = None
     source: Optional[str] = None
+    is_official_source: Optional[bool] = None
 
 class InstructionResponse(BaseModel):
     status: str
