@@ -5,7 +5,6 @@ from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
 from typing import List, Optional
-import json
 
 # Load environment variables
 load_dotenv()
@@ -27,7 +26,7 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_KEY")
 )
 
-# Pydantic models
+
 class Site(BaseModel):
     id: Optional[int] = None
     category: Optional[str] = None
@@ -39,7 +38,7 @@ class Site(BaseModel):
     note: Optional[str] = None
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
-    image_link: Optional[str] = None  # Store as JSON string
+    image_link: Optional[List[str]] = [] 
 
 class SiteResponse(BaseModel):
     status: str
@@ -50,37 +49,14 @@ class SingleSiteResponse(BaseModel):
     status: str
     data: Site
 
-# Helper function to convert image_link list to JSON string if needed
-def prepare_image_link(site_dict):
-    if "image_link" in site_dict:
-        if isinstance(site_dict["image_link"], list):
-            site_dict["image_link"] = json.dumps(site_dict["image_link"])
-        elif site_dict["image_link"] is None:
-            site_dict["image_link"] = json.dumps([])
-    else:
-        site_dict["image_link"] = json.dumps([])
-    return site_dict
-
 # Root endpoint
 @app.get("/", response_model=dict)
 async def root():
     return {
         "message": "Egypt Sites API",
         "version": "1.1.0",
-        "description": "API for Egyptian historical sites, museums, tourist attractions, and detailed local place instructions.",
-        "endpoints": {
-            "GET /": "API documentation",
-            "GET /sites": "Get all sites (supports ?limit=50&offset=0 for pagination)",
-            "GET /site/{site_id}": "Get specific site by ID",
-            "GET /categories": "Get all available categories",
-            "GET /category/{category_name}": "Get sites by category",
-            "GET /instructions": "Get all place instructions (supports ?limit=50&offset=0 for pagination)",
-            "GET /instructions/{instruction_id}": "Get specific instruction by ID"
-        },
-        "interactive_docs": {
-            "swagger_ui": "/docs",
-            "redoc": "/redoc"
-        }
+        "description": "API for Egyptian historical sites...",
+        # ... rest of your description
     }
 
 # Get all sites
@@ -91,8 +67,13 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
             .select("*")\
             .range(offset, offset + limit - 1)\
             .execute()
-
-        sites = [Site(**prepare_image_link(site)) for site in response.data]
+        
+        sites = []
+        for site_data in response.data:
+             
+            if site_data.get("image_link") is None:
+                site_data["image_link"] = []
+            sites.append(Site(**site_data))
 
         return {
             "status": "success",
@@ -100,6 +81,7 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
             "count": len(sites)
         }
     except Exception as e:
+        print(f"Error: {e}") 
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Get site by ID
@@ -114,7 +96,13 @@ async def get_site_by_id(site_id: int):
         if not response.data:
             raise HTTPException(status_code=404, detail="Site not found")
 
-        site = Site(**prepare_image_link(response.data[0]))
+        site_data = response.data[0]
+        
+        # معالجة الـ Null
+        if site_data.get("image_link") is None:
+            site_data["image_link"] = []
+
+        site = Site(**site_data)
 
         return {
             "status": "success",
@@ -139,7 +127,11 @@ async def get_sites_by_category(category_name: str):
         if not response.data:
             raise HTTPException(status_code=404, detail=f"No sites found for category: {clean_category}")
 
-        sites = [Site(**prepare_image_link(site)) for site in response.data]
+        sites = []
+        for site_data in response.data:
+            if site_data.get("image_link") is None:
+                site_data["image_link"] = []
+            sites.append(Site(**site_data))
 
         return {
             "status": "success",
@@ -151,23 +143,6 @@ async def get_sites_by_category(category_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# Get all categories
-@app.get("/categories", response_model=dict)
-async def get_all_categories():
-    try:
-        response = supabase.table("egypt_sites")\
-            .select("category")\
-            .execute()
-
-        categories = list(set([site["category"] for site in response.data]))
-
-        return {
-            "status": "success",
-            "categories": categories,
-            "count": len(categories)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Instructions models
 class Instruction(BaseModel):
