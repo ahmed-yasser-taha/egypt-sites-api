@@ -1,10 +1,11 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
-from typing import List, Optional
+from typing import List, Optional, Any, Union
+import json
 
 # Load environment variables
 load_dotenv()
@@ -20,12 +21,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Supabase client
+# Supabase client setup
 supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
 )
 
+# --- Pydantic Models ---
 
 class Site(BaseModel):
     id: Optional[int] = None
@@ -38,7 +40,37 @@ class Site(BaseModel):
     note: Optional[str] = None
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
-    image_link: Optional[List[str]] = [] 
+    
+    # CRITICAL FIX: Defined as a List[str] because Supabase JSONB returns a list.
+    # We use a default_factory to ensure it defaults to an empty list if missing.
+    image_link: List[str] = Field(default_factory=list)
+
+    # Validator to handle various input types safely (List, String, or None)
+    # mode='before' runs this logic BEFORE Pydantic checks types.
+    @field_validator('image_link', mode='before')
+    @classmethod
+    def parse_image_link(cls, v: Any) -> List[str]:
+        # Case 1: If value is None, return empty list
+        if v is None:
+            return []
+        
+        # Case 2: If it's already a list (Standard Supabase JSONB behavior), return it
+        if isinstance(v, list):
+            return v
+            
+        # Case 3: If it's a string (e.g. JSON stringified), try to parse it
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+                return [v] # If parsing returns non-list, wrap strictly in list
+            except json.JSONDecodeError:
+                # If string is not JSON, treat it as a single URL
+                return [v]
+        
+        # Fallback: return empty list
+        return []
 
 class SiteResponse(BaseModel):
     status: str
@@ -54,9 +86,17 @@ class SingleSiteResponse(BaseModel):
 async def root():
     return {
         "message": "Egypt Sites API",
-        "version": "1.1.0",
-        "description": "API for Egyptian historical sites...",
-        # ... rest of your description
+        "version": "1.2.0", # Bumped version for the fix
+        "description": "API for Egyptian historical sites, museums, and tourist attractions.",
+        "endpoints": {
+            "GET /": "API documentation",
+            "GET /sites": "Get all sites (supports ?limit=50&offset=0)",
+            "GET /site/{site_id}": "Get specific site by ID",
+            "GET /categories": "Get all available categories",
+            "GET /category/{category_name}": "Get sites by category",
+            "GET /instructions": "Get all place instructions",
+            "GET /instructions/{instruction_id}": "Get specific instruction by ID"
+        }
     }
 
 # Get all sites
@@ -67,13 +107,9 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
             .select("*")\
             .range(offset, offset + limit - 1)\
             .execute()
-        
-        sites = []
-        for site_data in response.data:
-             
-            if site_data.get("image_link") is None:
-                site_data["image_link"] = []
-            sites.append(Site(**site_data))
+
+        # Map directly to Site model; the validator handles the list logic
+        sites = [Site(**site) for site in response.data]
 
         return {
             "status": "success",
@@ -81,7 +117,7 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
             "count": len(sites)
         }
     except Exception as e:
-        print(f"Error: {e}") 
+        print(f"DEBUG ERROR: {e}") # Print error to server logs
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Get site by ID
@@ -96,13 +132,7 @@ async def get_site_by_id(site_id: int):
         if not response.data:
             raise HTTPException(status_code=404, detail="Site not found")
 
-        site_data = response.data[0]
-        
-        # معالجة الـ Null
-        if site_data.get("image_link") is None:
-            site_data["image_link"] = []
-
-        site = Site(**site_data)
+        site = Site(**response.data[0])
 
         return {
             "status": "success",
@@ -117,6 +147,7 @@ async def get_site_by_id(site_id: int):
 @app.get("/category/{category_name}", response_model=SiteResponse)
 async def get_sites_by_category(category_name: str):
     try:
+        # Convert URL format (e.g., "ancient_egypt") to DB format (e.g., "Ancient Egypt")
         clean_category = category_name.replace("_", " ").title()
 
         response = supabase.table("egypt_sites")\
@@ -127,11 +158,7 @@ async def get_sites_by_category(category_name: str):
         if not response.data:
             raise HTTPException(status_code=404, detail=f"No sites found for category: {clean_category}")
 
-        sites = []
-        for site_data in response.data:
-            if site_data.get("image_link") is None:
-                site_data["image_link"] = []
-            sites.append(Site(**site_data))
+        sites = [Site(**site) for site in response.data]
 
         return {
             "status": "success",
@@ -143,8 +170,27 @@ async def get_sites_by_category(category_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+# Get all categories
+@app.get("/categories", response_model=dict)
+async def get_all_categories():
+    try:
+        response = supabase.table("egypt_sites")\
+            .select("category")\
+            .execute()
 
-# Instructions models
+        # Use set to get unique categories
+        categories = list(set([site["category"] for site in response.data if site["category"]]))
+
+        return {
+            "status": "success",
+            "categories": categories,
+            "count": len(categories)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# --- Instruction Models & Endpoints ---
+
 class Instruction(BaseModel):
     id: Optional[int] = None
     image_url: Optional[str] = None
@@ -206,4 +252,5 @@ async def get_instruction_by_id(instruction_id: int):
 
 if __name__ == "__main__":
     import uvicorn
+    # Run the application
     uvicorn.run(app, host="0.0.0.0", port=8000)
