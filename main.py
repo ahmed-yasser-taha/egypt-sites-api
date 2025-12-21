@@ -37,9 +37,7 @@ class Site(BaseModel):
     note: Optional[str] = None
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
-    image_link: Optional[str] = None
-    image_link_2: Optional[str] = None
-    image_link_3: Optional[str] = None
+    image_link: Optional[list[str]] = []
     
 
 class SiteResponse(BaseModel):
