@@ -1,17 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Json
+from pydantic import BaseModel
 from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
 from typing import List, Optional
+import json
 
-# Load environment variables from .env
+# Load environment variables
 load_dotenv()
 
 app = FastAPI(title="Egypt Sites API", version="1.0.0")
 
-# Enable CORS for all origins (adjust as needed)
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,16 +21,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Supabase client
+# Supabase client
 supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
 )
 
-# ----------------------
 # Pydantic models
-# ----------------------
-
 class Site(BaseModel):
     id: Optional[int] = None
     category: Optional[str] = None
@@ -41,29 +39,31 @@ class Site(BaseModel):
     note: Optional[str] = None
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
-    image_link: Optional[List[str]] = Field(default_factory=list, mode='json')
-
+    image_link: Optional[str] = None  # Store as JSON string
 
 class SiteResponse(BaseModel):
     status: str
     data: List[Site]
     count: int
 
-
 class SingleSiteResponse(BaseModel):
     status: str
     data: Site
 
+# Helper function to convert image_link list to JSON string if needed
+def prepare_image_link(site_dict):
+    if "image_link" in site_dict:
+        if isinstance(site_dict["image_link"], list):
+            site_dict["image_link"] = json.dumps(site_dict["image_link"])
+        elif site_dict["image_link"] is None:
+            site_dict["image_link"] = json.dumps([])
+    else:
+        site_dict["image_link"] = json.dumps([])
+    return site_dict
 
-# ----------------------
-# API Endpoints
-# ----------------------
-
+# Root endpoint
 @app.get("/", response_model=dict)
 async def root():
-    """
-    Root endpoint with basic API info and example usage
-    """
     return {
         "message": "Egypt Sites API",
         "version": "1.1.0",
@@ -80,31 +80,19 @@ async def root():
         "interactive_docs": {
             "swagger_ui": "/docs",
             "redoc": "/redoc"
-        },
-        "example_usage": {
-            "get_all_sites": "/sites?limit=10&offset=0",
-            "get_site_by_id": "/site/1",
-            "get_categories": "/categories",
-            "get_museums": "/category/Museums",
-            "get_historical_sites": "/category/Historical_Sites",
-            "get_all_instructions": "/instructions?limit=10&offset=0",
-            "get_instruction_by_id": "/instructions/1"
         }
     }
 
-
+# Get all sites
 @app.get("/sites", response_model=SiteResponse)
 async def get_all_sites(limit: int = 50, offset: int = 0):
-    """
-    Get all sites with pagination
-    """
     try:
         response = supabase.table("egypt_sites")\
             .select("*")\
             .range(offset, offset + limit - 1)\
             .execute()
 
-        sites = [Site(**site) for site in response.data]
+        sites = [Site(**prepare_image_link(site)) for site in response.data]
 
         return {
             "status": "success",
@@ -114,12 +102,9 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-
+# Get site by ID
 @app.get("/site/{site_id}", response_model=SingleSiteResponse)
 async def get_site_by_id(site_id: int):
-    """
-    Get a single site by ID
-    """
     try:
         response = supabase.table("egypt_sites")\
             .select("*")\
@@ -129,7 +114,7 @@ async def get_site_by_id(site_id: int):
         if not response.data:
             raise HTTPException(status_code=404, detail="Site not found")
 
-        site = Site(**response.data[0])
+        site = Site(**prepare_image_link(response.data[0]))
 
         return {
             "status": "success",
@@ -140,12 +125,9 @@ async def get_site_by_id(site_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-
+# Get sites by category
 @app.get("/category/{category_name}", response_model=SiteResponse)
 async def get_sites_by_category(category_name: str):
-    """
-    Get all sites by category name
-    """
     try:
         clean_category = category_name.replace("_", " ").title()
 
@@ -157,7 +139,7 @@ async def get_sites_by_category(category_name: str):
         if not response.data:
             raise HTTPException(status_code=404, detail=f"No sites found for category: {clean_category}")
 
-        sites = [Site(**site) for site in response.data]
+        sites = [Site(**prepare_image_link(site)) for site in response.data]
 
         return {
             "status": "success",
@@ -169,12 +151,9 @@ async def get_sites_by_category(category_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-
+# Get all categories
 @app.get("/categories", response_model=dict)
 async def get_all_categories():
-    """
-    Get all available categories
-    """
     try:
         response = supabase.table("egypt_sites")\
             .select("category")\
@@ -190,11 +169,7 @@ async def get_all_categories():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-
-# ----------------------
-# Instructions models and endpoints
-# ----------------------
-
+# Instructions models
 class Instruction(BaseModel):
     id: Optional[int] = None
     image_url: Optional[str] = None
@@ -203,23 +178,18 @@ class Instruction(BaseModel):
     source: Optional[str] = None
     is_official_source: Optional[bool] = None
 
-
 class InstructionResponse(BaseModel):
     status: str
     data: List[Instruction]
     count: int
 
-
 class SingleInstructionResponse(BaseModel):
     status: str
     data: Instruction
 
-
+# Get all instructions
 @app.get("/instructions", response_model=InstructionResponse)
 async def get_all_instructions(limit: int = 50, offset: int = 0):
-    """
-    Get all place instructions with pagination
-    """
     try:
         response = supabase.table("places_instructions")\
             .select("*")\
@@ -236,12 +206,9 @@ async def get_all_instructions(limit: int = 50, offset: int = 0):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-
+# Get instruction by ID
 @app.get("/instructions/{instruction_id}", response_model=SingleInstructionResponse)
 async def get_instruction_by_id(instruction_id: int):
-    """
-    Get a single place instruction by ID
-    """
     try:
         response = supabase.table("places_instructions")\
             .select("*")\
@@ -262,10 +229,6 @@ async def get_instruction_by_id(instruction_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-
-# ----------------------
-# Run server
-# ----------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
