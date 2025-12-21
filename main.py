@@ -52,12 +52,24 @@ class SingleSiteResponse(BaseModel):
 
 # Helper function to fix image_link
 def fix_image_link(site_dict):
-    if site_dict.get("image_link") and isinstance(site_dict["image_link"], str):
+    """
+    Converts image_link to list[str] if needed
+    """
+    val = site_dict.get("image_link")
+    if val is None:
+        site_dict["image_link"] = []
+    elif isinstance(val, str):
         try:
-            site_dict["image_link"] = json.loads(site_dict["image_link"])
+            site_dict["image_link"] = json.loads(val)
         except json.JSONDecodeError:
-            site_dict["image_link"] = []
+            site_dict["image_link"] = [val]
+    elif isinstance(val, list):
+        site_dict["image_link"] = val
+    else:
+        site_dict["image_link"] = []
+
     return site_dict
+
 
 # Endpoints
 @app.get("/", response_model=dict)
