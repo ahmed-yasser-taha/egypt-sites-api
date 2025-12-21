@@ -41,7 +41,7 @@ class Site(BaseModel):
     note: Optional[str] = None
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
-    image_link: Optional[Json[List[str]]] = None  # <-- JSONB array of strings
+    image_link: Optional[List[str]] = Field(default_factory=list, mode='json')
 
 
 class SiteResponse(BaseModel):
