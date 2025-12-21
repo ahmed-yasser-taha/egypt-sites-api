@@ -1,10 +1,11 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
 from typing import List, Optional
+import json
 
 # Load environment variables
 load_dotenv()
@@ -37,16 +38,26 @@ class Site(BaseModel):
     note: Optional[str] = None
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
-    image_link: Optional[List[str]] = None
+    image_link: Optional[list[str]] = None
     
 
 class SiteResponse(BaseModel):
     status: str
     data: List[Site]
     count: int
+
 class SingleSiteResponse(BaseModel):
     status: str
     data: Site
+
+# Helper function to fix image_link
+def fix_image_link(site_dict):
+    if site_dict.get("image_link") and isinstance(site_dict["image_link"], str):
+        try:
+            site_dict["image_link"] = json.loads(site_dict["image_link"])
+        except json.JSONDecodeError:
+            site_dict["image_link"] = []
+    return site_dict
 
 # Endpoints
 @app.get("/", response_model=dict)
@@ -79,19 +90,15 @@ async def root():
         }
     }
 
- 
 @app.get("/sites", response_model=SiteResponse)
 async def get_all_sites(limit: int = 50, offset: int = 0):
-    """
-    Get all sites with pagination
-    """
     try:
         response = supabase.table("egypt_sites")\
             .select("*")\
             .range(offset, offset + limit - 1)\
             .execute()
         
-        sites = [Site(**site) for site in response.data]
+        sites = [Site(**fix_image_link(site)) for site in response.data]
         
         return {
             "status": "success",
@@ -103,9 +110,6 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
 
 @app.get("/site/{site_id}", response_model=SingleSiteResponse)
 async def get_site_by_id(site_id: int):
-    """
-    Get a single site by ID
-    """
     try:
         response = supabase.table("egypt_sites")\
             .select("*")\
@@ -115,7 +119,7 @@ async def get_site_by_id(site_id: int):
         if not response.data:
             raise HTTPException(status_code=404, detail="Site not found")
         
-        site = Site(**response.data[0])
+        site = Site(**fix_image_link(response.data[0]))
         
         return {
             "status": "success",
@@ -128,11 +132,7 @@ async def get_site_by_id(site_id: int):
 
 @app.get("/category/{category_name}", response_model=SiteResponse)
 async def get_sites_by_category(category_name: str):
-    """
-    Get all sites by category
-    """
     try:
-        # Clean category name and replace spaces with underscores for URL
         clean_category = category_name.replace("_", " ").title()
         
         response = supabase.table("egypt_sites")\
@@ -143,7 +143,7 @@ async def get_sites_by_category(category_name: str):
         if not response.data:
             raise HTTPException(status_code=404, detail=f"No sites found for category: {clean_category}")
         
-        sites = [Site(**site) for site in response.data]
+        sites = [Site(**fix_image_link(site)) for site in response.data]
         
         return {
             "status": "success",
@@ -157,9 +157,6 @@ async def get_sites_by_category(category_name: str):
 
 @app.get("/categories", response_model=dict)
 async def get_all_categories():
-    """
-    Get all available categories
-    """
     try:
         response = supabase.table("egypt_sites")\
             .select("category")\
@@ -193,12 +190,8 @@ class SingleInstructionResponse(BaseModel):
     status: str
     data: Instruction
 
-
 @app.get("/instructions", response_model=InstructionResponse)
 async def get_all_instructions(limit: int = 50, offset: int = 0):
-    """
-    Get all place instructions with pagination
-    """
     try:
         response = supabase.table("places_instructions")\
             .select("*")\
@@ -215,12 +208,8 @@ async def get_all_instructions(limit: int = 50, offset: int = 0):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-
 @app.get("/instructions/{instruction_id}", response_model=SingleInstructionResponse)
 async def get_instruction_by_id(instruction_id: int):
-    """
-    Get a single place instruction by ID
-    """
     try:
         response = supabase.table("places_instructions")\
             .select("*")\
