@@ -1,18 +1,17 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Json
 from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
 from typing import List, Optional
-import json
 
-# Load environment variables from .env file
+# Load environment variables from .env
 load_dotenv()
 
 app = FastAPI(title="Egypt Sites API", version="1.0.0")
 
-# Enable CORS
+# Enable CORS for all origins (adjust as needed)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,9 +26,10 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_KEY")
 )
 
-# -------------------------
-# Pydantic Models
-# -------------------------
+# ----------------------
+# Pydantic models
+# ----------------------
+
 class Site(BaseModel):
     id: Optional[int] = None
     category: Optional[str] = None
@@ -41,86 +41,28 @@ class Site(BaseModel):
     note: Optional[str] = None
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
-    image_link: Optional[List[str]] = None  # This field contains list of image URLs
+    image_link: Optional[Json[List[str]]] = None  # <-- JSONB array of strings
 
-    # Validator to ensure image_link is always a list of strings
-    @field_validator("image_link", mode="before")
-    def validate_image_link(cls, v):
-        """
-        Convert image_link to list[str] if needed.
-        Handles:
-        - None -> empty list
-        - string -> parse JSON or wrap as single-element list
-        - list -> return as is
-        - any other type -> empty list
-        """
-        if v is None:
-            return []
-        if isinstance(v, str):
-            try:
-                return json.loads(v)
-            except json.JSONDecodeError:
-                return [v]
-        if isinstance(v, list):
-            return v
-        return []
 
 class SiteResponse(BaseModel):
     status: str
     data: List[Site]
     count: int
 
+
 class SingleSiteResponse(BaseModel):
     status: str
     data: Site
 
-# Pydantic model for instructions
-class Instruction(BaseModel):
-    id: Optional[int] = None
-    image_url: Optional[str] = None
-    place: Optional[str] = None
-    instructions: Optional[str] = None
-    source: Optional[str] = None
-    is_official_source: Optional[bool] = None
 
-class InstructionResponse(BaseModel):
-    status: str
-    data: List[Instruction]
-    count: int
+# ----------------------
+# API Endpoints
+# ----------------------
 
-class SingleInstructionResponse(BaseModel):
-    status: str
-    data: Instruction
-
-# -------------------------
-# Helper Functions
-# -------------------------
-def fix_image_link(site_dict):
-    """
-    Optional helper to fix image_link from Supabase response.
-    Works in case image_link comes as string or None.
-    """
-    val = site_dict.get("image_link")
-    if val is None:
-        site_dict["image_link"] = []
-    elif isinstance(val, str):
-        try:
-            site_dict["image_link"] = json.loads(val)
-        except json.JSONDecodeError:
-            site_dict["image_link"] = [val]
-    elif isinstance(val, list):
-        site_dict["image_link"] = val
-    else:
-        site_dict["image_link"] = []
-    return site_dict
-
-# -------------------------
-# Endpoints
-# -------------------------
 @app.get("/", response_model=dict)
 async def root():
     """
-    Root endpoint with API info and example usage.
+    Root endpoint with basic API info and example usage
     """
     return {
         "message": "Egypt Sites API",
@@ -150,6 +92,7 @@ async def root():
         }
     }
 
+
 @app.get("/sites", response_model=SiteResponse)
 async def get_all_sites(limit: int = 50, offset: int = 0):
     """
@@ -160,9 +103,9 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
             .select("*")\
             .range(offset, offset + limit - 1)\
             .execute()
-        
-        sites = [Site(**fix_image_link(site)) for site in response.data]
-        
+
+        sites = [Site(**site) for site in response.data]
+
         return {
             "status": "success",
             "data": sites,
@@ -170,6 +113,7 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 
 @app.get("/site/{site_id}", response_model=SingleSiteResponse)
 async def get_site_by_id(site_id: int):
@@ -181,12 +125,12 @@ async def get_site_by_id(site_id: int):
             .select("*")\
             .eq("id", site_id)\
             .execute()
-        
+
         if not response.data:
             raise HTTPException(status_code=404, detail="Site not found")
-        
-        site = Site(**fix_image_link(response.data[0]))
-        
+
+        site = Site(**response.data[0])
+
         return {
             "status": "success",
             "data": site
@@ -196,23 +140,25 @@ async def get_site_by_id(site_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+
 @app.get("/category/{category_name}", response_model=SiteResponse)
 async def get_sites_by_category(category_name: str):
     """
-    Get all sites filtered by category
+    Get all sites by category name
     """
     try:
         clean_category = category_name.replace("_", " ").title()
+
         response = supabase.table("egypt_sites")\
             .select("*")\
             .eq("category", clean_category)\
             .execute()
-        
+
         if not response.data:
             raise HTTPException(status_code=404, detail=f"No sites found for category: {clean_category}")
-        
-        sites = [Site(**fix_image_link(site)) for site in response.data]
-        
+
+        sites = [Site(**site) for site in response.data]
+
         return {
             "status": "success",
             "data": sites,
@@ -223,6 +169,7 @@ async def get_sites_by_category(category_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+
 @app.get("/categories", response_model=dict)
 async def get_all_categories():
     """
@@ -232,9 +179,9 @@ async def get_all_categories():
         response = supabase.table("egypt_sites")\
             .select("category")\
             .execute()
-        
+
         categories = list(set([site["category"] for site in response.data]))
-        
+
         return {
             "status": "success",
             "categories": categories,
@@ -242,6 +189,31 @@ async def get_all_categories():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# ----------------------
+# Instructions models and endpoints
+# ----------------------
+
+class Instruction(BaseModel):
+    id: Optional[int] = None
+    image_url: Optional[str] = None
+    place: Optional[str] = None
+    instructions: Optional[str] = None
+    source: Optional[str] = None
+    is_official_source: Optional[bool] = None
+
+
+class InstructionResponse(BaseModel):
+    status: str
+    data: List[Instruction]
+    count: int
+
+
+class SingleInstructionResponse(BaseModel):
+    status: str
+    data: Instruction
+
 
 @app.get("/instructions", response_model=InstructionResponse)
 async def get_all_instructions(limit: int = 50, offset: int = 0):
@@ -253,9 +225,9 @@ async def get_all_instructions(limit: int = 50, offset: int = 0):
             .select("*")\
             .range(offset, offset + limit - 1)\
             .execute()
-        
+
         data = [Instruction(**row) for row in response.data]
-        
+
         return {
             "status": "success",
             "data": data,
@@ -263,6 +235,7 @@ async def get_all_instructions(limit: int = 50, offset: int = 0):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 
 @app.get("/instructions/{instruction_id}", response_model=SingleInstructionResponse)
 async def get_instruction_by_id(instruction_id: int):
@@ -274,12 +247,12 @@ async def get_instruction_by_id(instruction_id: int):
             .select("*")\
             .eq("id", instruction_id)\
             .execute()
-        
+
         if not response.data:
             raise HTTPException(status_code=404, detail="Instruction not found")
-        
+
         instruction = Instruction(**response.data[0])
-        
+
         return {
             "status": "success",
             "data": instruction
@@ -289,9 +262,10 @@ async def get_instruction_by_id(instruction_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# -------------------------
-# Main entry point
-# -------------------------
+
+# ----------------------
+# Run server
+# ----------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
