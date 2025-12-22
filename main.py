@@ -1,10 +1,12 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
-from typing import List, Optional
+from typing import List, Optional, Any
+import json
+
 
 # Load environment variables
 load_dotenv()
@@ -25,7 +27,10 @@ supabase: Client = create_client(
     os.getenv("SUPABASE_KEY")
 )
 
-# Pydantic models
+from pydantic import field_validator
+import json
+from typing import Any
+
 class Site(BaseModel):
     id: Optional[int] = None
     category: Optional[str] = None
@@ -38,6 +43,20 @@ class Site(BaseModel):
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
     image_link: Optional[List[str]] = None
+
+    @field_validator("image_link", mode="before")
+    @classmethod
+    def parse_image_link(cls, v: Any):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return []
+        return []
     
 
 class SiteResponse(BaseModel):
