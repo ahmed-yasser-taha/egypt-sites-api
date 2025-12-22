@@ -50,13 +50,17 @@ class Site(BaseModel):
         if v is None:
             return None
         if isinstance(v, list):
-            return v
+            # If it's already a list, return it as-is
+            return v if v else None
         if isinstance(v, str):
+            # Try to parse as JSON array
             try:
-                return json.loads(v)
-            except Exception:
-                return []
-        return []
+                parsed = json.loads(v)
+                return parsed if isinstance(parsed, list) else None
+            except (json.JSONDecodeError, ValueError):
+                # If it's a plain string URL, wrap it in a list
+                return [v] if v else None
+        return None
     
 
 class SiteResponse(BaseModel):
