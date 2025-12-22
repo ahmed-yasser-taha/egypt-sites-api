@@ -43,49 +43,39 @@ class Site(BaseModel):
     note: Optional[str] = None
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
-    
-    # -----------------------------------------------------
-    # CRITICAL FIX: Robust Image Link Handling
-    # -----------------------------------------------------
-    # We define the field as a List[str].
-    # We use a validator with mode='before' to intercept the data 
-    # coming from Supabase BEFORE Pydantic checks the type.
+
+    # -------------------------------
+    # Handle image_link as List[str]
+    # -------------------------------
     image_link: List[str] = Field(default_factory=list)
 
     @field_validator('image_link', mode='before')
     @classmethod
-    def parse_image_link(cls, v: Any) -> List[str]:
+    def ensure_list_of_strings(cls, v):
         """
-        Safely parses the image_link field regardless of its input format.
-        It handles:
-        1. None/Null -> returns empty list []
-        2. List (Standard JSONB) -> returns the list as is
-        3. String (JSON encoded or raw URL) -> attempts to parse or wrap in list
+        Robustly handle image_link from Supabase:
+        - None -> empty list
+        - List[str] -> return as is
+        - JSON string representing list -> parse it
+        - Single string -> wrap in list
         """
-        # Case 1: Handle None/Null
         if v is None:
             return []
-        
-        # Case 2: Handle List (This fixes your specific error)
         if isinstance(v, list):
-            return v
-            
-        # Case 3: Handle String (Legacy data or JSON strings)
+            # Ensure all elements are strings
+            return [str(item) for item in v]
         if isinstance(v, str):
-            # Check for empty string or "null" string
-            if not v.strip() or v.lower() == 'null':
+            v = v.strip()
+            if not v or v.lower() == "null":
                 return []
             try:
-                # Try to parse JSON string
                 parsed = json.loads(v)
                 if isinstance(parsed, list):
-                    return parsed
-                return [v] # If parsing returns a dict or other, wrap it
-            except json.JSONDecodeError:
-                # If not JSON, treat the string as a single URL
+                    return [str(item) for item in parsed]
                 return [v]
-        
-        # Fallback for unexpected types
+            except json.JSONDecodeError:
+                return [v]
+        # Unexpected type -> return empty list
         return []
 
 class SiteResponse(BaseModel):
