@@ -10,9 +10,10 @@ import json
 # Load environment variables
 load_dotenv()
 
-app = FastAPI(title="Egypt Sites API", version="1.0.0")
+# Initialize FastAPI app
+app = FastAPI(title="Egypt Sites API", version="1.2.0")
 
-# CORS middleware
+# CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,13 +22,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Supabase client setup
+# Initialize Supabase client
 supabase: Client = create_client(
     os.getenv("SUPABASE_URL"),
     os.getenv("SUPABASE_KEY")
 )
 
-# --- Pydantic Models ---
+# ---------------------------------------------------------
+# Pydantic Models (The Fix is Here)
+# ---------------------------------------------------------
 
 class Site(BaseModel):
     id: Optional[int] = None
@@ -41,35 +44,48 @@ class Site(BaseModel):
     booking: Optional[str] = None
     gmaps_link: Optional[str] = None
     
-    # CRITICAL FIX: Defined as a List[str] because Supabase JSONB returns a list.
-    # We use a default_factory to ensure it defaults to an empty list if missing.
+    # -----------------------------------------------------
+    # CRITICAL FIX: Robust Image Link Handling
+    # -----------------------------------------------------
+    # We define the field as a List[str].
+    # We use a validator with mode='before' to intercept the data 
+    # coming from Supabase BEFORE Pydantic checks the type.
     image_link: List[str] = Field(default_factory=list)
 
-    # Validator to handle various input types safely (List, String, or None)
-    # mode='before' runs this logic BEFORE Pydantic checks types.
     @field_validator('image_link', mode='before')
     @classmethod
     def parse_image_link(cls, v: Any) -> List[str]:
-        # Case 1: If value is None, return empty list
+        """
+        Safely parses the image_link field regardless of its input format.
+        It handles:
+        1. None/Null -> returns empty list []
+        2. List (Standard JSONB) -> returns the list as is
+        3. String (JSON encoded or raw URL) -> attempts to parse or wrap in list
+        """
+        # Case 1: Handle None/Null
         if v is None:
             return []
         
-        # Case 2: If it's already a list (Standard Supabase JSONB behavior), return it
+        # Case 2: Handle List (This fixes your specific error)
         if isinstance(v, list):
             return v
             
-        # Case 3: If it's a string (e.g. JSON stringified), try to parse it
+        # Case 3: Handle String (Legacy data or JSON strings)
         if isinstance(v, str):
+            # Check for empty string or "null" string
+            if not v.strip() or v.lower() == 'null':
+                return []
             try:
+                # Try to parse JSON string
                 parsed = json.loads(v)
                 if isinstance(parsed, list):
                     return parsed
-                return [v] # If parsing returns non-list, wrap strictly in list
+                return [v] # If parsing returns a dict or other, wrap it
             except json.JSONDecodeError:
-                # If string is not JSON, treat it as a single URL
+                # If not JSON, treat the string as a single URL
                 return [v]
         
-        # Fallback: return empty list
+        # Fallback for unexpected types
         return []
 
 class SiteResponse(BaseModel):
@@ -81,16 +97,20 @@ class SingleSiteResponse(BaseModel):
     status: str
     data: Site
 
+# ---------------------------------------------------------
+# API Endpoints
+# ---------------------------------------------------------
+
 # Root endpoint
 @app.get("/", response_model=dict)
 async def root():
     return {
         "message": "Egypt Sites API",
-        "version": "1.2.0", # Bumped version for the fix
+        "version": "1.2.0",
         "description": "API for Egyptian historical sites, museums, and tourist attractions.",
         "endpoints": {
             "GET /": "API documentation",
-            "GET /sites": "Get all sites (supports ?limit=50&offset=0)",
+            "GET /sites": "Get all sites (supports pagination)",
             "GET /site/{site_id}": "Get specific site by ID",
             "GET /categories": "Get all available categories",
             "GET /category/{category_name}": "Get sites by category",
@@ -108,7 +128,7 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
             .range(offset, offset + limit - 1)\
             .execute()
 
-        # Map directly to Site model; the validator handles the list logic
+        # Pass data directly to Pydantic. The validator handles the types.
         sites = [Site(**site) for site in response.data]
 
         return {
@@ -117,7 +137,8 @@ async def get_all_sites(limit: int = 50, offset: int = 0):
             "count": len(sites)
         }
     except Exception as e:
-        print(f"DEBUG ERROR: {e}") # Print error to server logs
+        # Log error for debugging
+        print(f"Server Error in /sites: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Get site by ID
@@ -147,7 +168,7 @@ async def get_site_by_id(site_id: int):
 @app.get("/category/{category_name}", response_model=SiteResponse)
 async def get_sites_by_category(category_name: str):
     try:
-        # Convert URL format (e.g., "ancient_egypt") to DB format (e.g., "Ancient Egypt")
+        # Convert URL slug to DB format (e.g. "ancient_egypt" -> "Ancient Egypt")
         clean_category = category_name.replace("_", " ").title()
 
         response = supabase.table("egypt_sites")\
@@ -178,7 +199,7 @@ async def get_all_categories():
             .select("category")\
             .execute()
 
-        # Use set to get unique categories
+        # Extract unique categories
         categories = list(set([site["category"] for site in response.data if site["category"]]))
 
         return {
@@ -189,7 +210,9 @@ async def get_all_categories():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# --- Instruction Models & Endpoints ---
+# ---------------------------------------------------------
+# Instruction Endpoints
+# ---------------------------------------------------------
 
 class Instruction(BaseModel):
     id: Optional[int] = None
@@ -208,7 +231,6 @@ class SingleInstructionResponse(BaseModel):
     status: str
     data: Instruction
 
-# Get all instructions
 @app.get("/instructions", response_model=InstructionResponse)
 async def get_all_instructions(limit: int = 50, offset: int = 0):
     try:
@@ -227,7 +249,6 @@ async def get_all_instructions(limit: int = 50, offset: int = 0):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# Get instruction by ID
 @app.get("/instructions/{instruction_id}", response_model=SingleInstructionResponse)
 async def get_instruction_by_id(instruction_id: int):
     try:
@@ -250,7 +271,8 @@ async def get_instruction_by_id(instruction_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+# Main entry point
 if __name__ == "__main__":
     import uvicorn
-    # Run the application
+    # Start the server
     uvicorn.run(app, host="0.0.0.0", port=8000)
