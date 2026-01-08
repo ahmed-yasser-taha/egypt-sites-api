@@ -15,7 +15,7 @@ load_dotenv()
 app = FastAPI(title="Egypt Sites API", version="1.1.0")
 
 # =========================
-# CORS middleware
+# CORS middleware>>>
 # =========================
 app.add_middleware(
     CORSMiddleware,
